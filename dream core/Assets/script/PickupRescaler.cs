@@ -86,7 +86,13 @@ public class PickupRescaler : MonoBehaviour
             // ====== 新增：关闭阴影 ======
             if (heldObject.TryGetComponent(out Renderer rend))
                 rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            foreach (Renderer r in heldObject.GetComponentsInChildren<Renderer>())
+            {
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                r.receiveShadows = false;   // 关键：不接收任何阴影
+            }
         }
+      
     }
 
     // 更新握持物体的位置和缩放
@@ -123,6 +129,7 @@ public class PickupRescaler : MonoBehaviour
 
         // 更新缩放 (超阈限空间的核心效果)
         heldObject.localScale = originalScale * (actualDistance / originalDistance);
+
     }
 
     // 计算物体在射线方向上的大小偏移
@@ -209,12 +216,17 @@ public class PickupRescaler : MonoBehaviour
             rb.velocity = centerRay.direction * 0.1f;
         }
         // 恢复实时阴影
-        if (heldObject.TryGetComponent(out Renderer rend))
-            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+        // ================= 恢复两行：阴影 & 队列 =================
+        foreach (Renderer r in heldObject.GetComponentsInChildren<Renderer>())
+        {
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            r.receiveShadows = true;
+        }
 
         // 重置引用
         heldObject = null;
         heldObjectCollider = null;
+       
     }
 
     // 场景视图绘制调试射线

@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class PickupRescaler : MonoBehaviour
 {
@@ -22,6 +23,7 @@ public class PickupRescaler : MonoBehaviour
     private float currentHoldDistance;     // 当前握持距离
     private Collider heldObjectCollider;   // 握持物体的碰撞器
     private Bounds originalBounds;         // 原始边界
+    private CommandBuffer cmdBuf;  // 额外渲染指令
 
     void Awake()
     {
@@ -53,46 +55,46 @@ public class PickupRescaler : MonoBehaviour
     // 尝试拾取物体
     private void TryPickupObject()
     {
+        if (heldObject != null) return;          // 防止重复拾取
+
         Ray centerRay = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
+        if (!Physics.Raycast(centerRay, out RaycastHit hit, maxHoldDistance, grabbableLayers)) return;
 
-        // 只检测可抓取层的物体
-        if (Physics.Raycast(centerRay, out RaycastHit hit, maxHoldDistance, grabbableLayers))
+        heldObject = hit.transform;
+        heldObjectCollider = heldObject.GetComponent<Collider>();
+        if (heldObjectCollider == null)
+            heldObjectCollider = heldObject.gameObject.AddComponent<BoxCollider>();
+
+        originalScale = heldObject.localScale;
+        originalBounds = heldObjectCollider.bounds;
+        originalDistance = Vector3.Distance(playerCamera.transform.position, heldObject.position);
+        currentHoldDistance = originalDistance;
+
+        heldObject.SetParent(playerCamera.transform);
+
+        if (heldObject.TryGetComponent(out Rigidbody rb))
         {
-            heldObject = hit.transform;
-
-            // 获取物体碰撞器
-            heldObjectCollider = heldObject.GetComponent<Collider>();
-            if (heldObjectCollider == null)
-            {
-                // 如果没有碰撞器，尝试添加一个
-                heldObjectCollider = heldObject.gameObject.AddComponent<BoxCollider>();
-            }
-
-            // 记录初始状态
-            originalScale = heldObject.localScale;
-            originalBounds = heldObjectCollider.bounds;
-            originalDistance = Vector3.Distance(playerCamera.transform.position, heldObject.position);
-            currentHoldDistance = originalDistance;
-
-            // 设置物体父级为相机，方便跟随
-            heldObject.SetParent(playerCamera.transform);
-
-            // 禁用物理
-            if (heldObject.TryGetComponent(out Rigidbody rb))
-            {
-                rb.isKinematic = true;
-                rb.detectCollisions = true; // 确保碰撞检测仍然启用
-            }
-            // ====== 新增：关闭阴影 ======
-            if (heldObject.TryGetComponent(out Renderer rend))
-                rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            foreach (Renderer r in heldObject.GetComponentsInChildren<Renderer>())
-            {
-                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                r.receiveShadows = false;   // 关键：不接收任何阴影
-            }
+            rb.isKinematic = true;
+            rb.detectCollisions = true;
         }
-      
+
+        // 关闭阴影
+        foreach (Renderer r in heldObject.GetComponentsInChildren<Renderer>())
+        {
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+        }
+
+        // 创建 CommandBuffer（如果已存在先清理）
+        if (cmdBuf != null)
+        {
+            playerCamera.RemoveCommandBuffer(CameraEvent.AfterForwardOpaque, cmdBuf);
+            cmdBuf.Dispose();
+        }
+        cmdBuf = new CommandBuffer();
+        foreach (Renderer r in heldObject.GetComponentsInChildren<Renderer>())
+            cmdBuf.DrawRenderer(r, r.material);
+        playerCamera.AddCommandBuffer(CameraEvent.AfterForwardOpaque, cmdBuf);
     }
 
     // 更新握持物体的位置和缩放
@@ -179,54 +181,46 @@ public class PickupRescaler : MonoBehaviour
     {
         if (heldObject == null) return;
 
-        // 从相机发射射线检测障碍物
+        // 1. 清理 CommandBuffer
+        if (cmdBuf != null)
+        {
+            playerCamera.RemoveCommandBuffer(CameraEvent.AfterForwardOpaque, cmdBuf);
+            cmdBuf.Dispose();
+            cmdBuf = null;
+        }
+
+        // 2. 用 SphereCast 检测障碍物
         Ray centerRay = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
+        float radius = heldObjectCollider ? heldObjectCollider.bounds.extents.magnitude : 0.5f;
 
-        // 计算物体大小偏移
-        float objectSizeOffset = CalculateObjectSizeOffset(centerRay.direction);
+        float maxDist = maxHoldDistance * 2f;
+        float finalDist = maxDist;
 
-        // 检测障碍物层
-        if (Physics.Raycast(centerRay, out RaycastHit hit, maxHoldDistance * 2, obstacleLayers))
+        // 用球体射线检测，球面刚好贴墙
+        if (Physics.SphereCast(centerRay, radius, out RaycastHit hit, maxDist, obstacleLayers))
         {
-            // 精确放置在射线与障碍物的交点，考虑物体大小
-            Vector3 targetPosition = hit.point - centerRay.direction * (objectSizeOffset + minObstacleDistance);
-            heldObject.position = targetPosition;
-
-            // 让物体贴合表面
-            if (heldObject.TryGetComponent(out Renderer renderer))
-            {
-                // 计算物体边界到中心点的距离
-                float offset = Vector3.Dot(renderer.bounds.extents, hit.normal);
-                // 沿法线方向偏移，确保物体完全在障碍物外部
-                heldObject.position += hit.normal * (offset + minObstacleDistance);
-            }
-        }
-        else
-        {
-            // 如果没有检测到障碍物，放置在当前位置
-            heldObject.position = playerCamera.transform.TransformPoint(heldObject.localPosition);
+            finalDist = hit.distance;
         }
 
-        // 解除父子关系并恢复物理
+        finalDist = Mathf.Clamp(finalDist - minObstacleDistance, minHoldDistance, maxHoldDistance);
+        heldObject.position = centerRay.GetPoint(finalDist);
+
+        // 3. 其余逻辑不变
         heldObject.SetParent(null);
         if (heldObject.TryGetComponent(out Rigidbody rb))
         {
             rb.isKinematic = false;
-            // 给一个轻微的推力使其更自然
             rb.velocity = centerRay.direction * 0.1f;
         }
-        // 恢复实时阴影
-        // ================= 恢复两行：阴影 & 队列 =================
+
         foreach (Renderer r in heldObject.GetComponentsInChildren<Renderer>())
         {
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
             r.receiveShadows = true;
         }
 
-        // 重置引用
         heldObject = null;
         heldObjectCollider = null;
-       
     }
 
     // 场景视图绘制调试射线
@@ -247,12 +241,11 @@ public class PickupRescaler : MonoBehaviour
             Vector3 targetPos = playerCamera.transform.TransformPoint(0, 0, currentHoldDistance);
             Gizmos.DrawWireSphere(targetPos, 0.1f);
 
-            // 绘制物体大小偏移的调试球
             if (heldObjectCollider != null)
             {
                 Gizmos.color = Color.yellow;
-                float offset = CalculateObjectSizeOffset(centerRay.direction);
-                Gizmos.DrawWireSphere(targetPos, offset);
+                float radius = heldObjectCollider.bounds.extents.magnitude;
+                Gizmos.DrawWireSphere(heldObject.position, radius);
             }
         }
     }

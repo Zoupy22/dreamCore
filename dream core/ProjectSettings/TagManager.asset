@@ -6,6 +6,12 @@ TagManager:
   tags:
   - Obstacle
   - PhotoTarget
+  - "\u62FC\u56FE1"
+  - "\u62FC\u56FE2"
+  - "\u62FC\u56FE3"
+  - "\u62FC\u56FE1Slot"
+  - "\u62FC\u56FE2Slot"
+  - "\u62FC\u56FE3Slot"
   layers:
   - Default
   - TransparentFX
@@ -15,7 +21,7 @@ TagManager:
   - UI
   - ground
   - plane
-  - 
+  - canvas
   - 
   - 
   - 

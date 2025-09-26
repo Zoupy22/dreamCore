@@ -24,6 +24,9 @@ public class FirstPersonController : MonoBehaviour
     private bool isGrounded;
     private float xRotation = 0f;
 
+    private bool isFrozen = false;   // <-- 新增
+    public void SetFrozen(bool frozen) => isFrozen = frozen;
+
     void Start()
     {
         // 获取组件引用
@@ -36,8 +39,12 @@ public class FirstPersonController : MonoBehaviour
 
     void Update()
     {
-        // 检测是否在地面上
+        // ****** 冻结期间直接退出 ******
+        if (isFrozen) return;
+        // ********************************
+
         isGrounded = Physics.CheckSphere(groundCheck.position, groundDistance, groundMask);
+      
 
         // 当在地面上且速度向下时，重置垂直速度（防止累积重力）
         if (isGrounded && velocity.y < 0)

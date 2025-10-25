@@ -75,15 +75,16 @@ public class FirstPersonController : MonoBehaviour
         float mouseX = Input.GetAxis("Mouse X") * rotationSpeed;
         float mouseY = Input.GetAxis("Mouse Y") * rotationSpeed;
 
-        // 垂直旋转（上下看）
+        // 垂直
         xRotation -= mouseY;
         xRotation = Mathf.Clamp(xRotation, -90f, 90f); // 限制上下视角范围
 
         // 应用垂直旋转到相机
         playerCamera.transform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
 
-        // 水平旋转（左右看）- 旋转整个玩家
+        // 水平
         transform.Rotate(Vector3.up * mouseX);
+        
     }
 
     // 移动控制
